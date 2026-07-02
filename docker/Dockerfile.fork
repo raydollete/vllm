@@ -1,0 +1,38 @@
+# Overlay image: official vllm-openai + this fork's Python-only patch stack.
+#
+# Built by scripts/fork/build-image.sh — do not build by hand unless you know
+# the overlay/ context was generated from the stack tip (see FORK.md).
+#
+# Only valid while every patch in the stack is pure Python. If a patch ever
+# touches C/C++/CUDA, this overlay is silently wrong — build-image.sh refuses
+# that case; keep it that way.
+ARG VLLM_VERSION
+FROM vllm/vllm-openai:${VLLM_VERSION}
+
+ARG VLLM_VERSION
+ARG EXPECTED_VLLM_VERSION
+ARG STACK_TIP_SHA
+
+# Overlay tree mirrors the repo layout (vllm/...); resolve the installed
+# package location at build time instead of hardcoding a site-packages path.
+COPY overlay/vllm/ /tmp/fork-overlay/vllm/
+RUN set -eu; \
+    target="$(python3 -c 'import os, vllm; print(os.path.dirname(os.path.dirname(vllm.__file__)))')"; \
+    echo "Overlaying onto ${target}/vllm"; \
+    installed="$(python3 -c 'import vllm; print(vllm.__version__)')"; \
+    case "$installed" in \
+      "$EXPECTED_VLLM_VERSION"*) ;; \
+      *) echo "FATAL: image has vllm ${installed}, stack base expects ${EXPECTED_VLLM_VERSION}*" >&2; exit 1 ;; \
+    esac; \
+    (cd /tmp/fork-overlay && find vllm -type f) | while read -r f; do \
+      test -f "${target}/${f}" || { echo "FATAL: ${f} does not exist in the image — overlay/base mismatch" >&2; exit 1; }; \
+      install -m 0644 "/tmp/fork-overlay/${f}" "${target}/${f}"; \
+      echo "  patched ${f}"; \
+    done; \
+    rm -rf /tmp/fork-overlay; \
+    find "${target}/vllm" -name '__pycache__' -prune -exec rm -rf {} +; \
+    python3 -c 'import vllm.v1.structured_output, vllm.v1.core.sched.scheduler; print("import check OK")'
+
+LABEL org.opencontainers.image.revision="${STACK_TIP_SHA}" \
+      org.opencontainers.image.base.name="vllm/vllm-openai:${VLLM_VERSION}" \
+      dev.raydollete.fork.stack="${STACK_TIP_SHA}"
