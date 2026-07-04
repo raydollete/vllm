@@ -170,6 +170,21 @@ STACK_TIP=<tip> scripts/fork/build-image.sh v0.24.0
 docker run --gpus all ... vllm:2026-07-03 ...
 ```
 
+### Build provenance — what is in an image?
+
+Every build is documented **in git and in the image itself**, never in a
+hand-maintained ledger:
+
+- `build-image.sh` creates an annotated tag `build/<image-tag-suffix>`
+  (e.g. `build/2026-07-03`) at the exact tip commit. The annotation is the
+  manifest: base image + the patch commits included.
+  `git show build/2026-07-03` answers "what went into `vllm:2026-07-03`?"
+  The tag also keeps the built commit alive after later rebases move the
+  patch branches (otherwise the image's revision label would dangle).
+- The image carries labels: `org.opencontainers.image.revision` (tip SHA)
+  and `org.opencontainers.image.base.name` (exact official base image).
+  `docker inspect <image>` recovers both without the repo.
+
 Safety rails built into `build-image.sh` / `docker/Dockerfile.fork`:
 
 - **Base alignment enforced** — refuses to build unless `base/current` sits
