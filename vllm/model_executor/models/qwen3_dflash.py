@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import io
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 
 import torch
 import torch.nn.functional as F
@@ -39,6 +39,11 @@ from vllm.multimodal.inputs import NestedTensors
 from vllm.transformers_utils.config import set_default_rope_theta
 from vllm.transformers_utils.repo_utils import get_hf_file_bytes
 from vllm.v1.attention.backend import AttentionType
+from vllm.v1.kv_cache_interface import (
+    FullAttentionSpec,
+    KVCacheSpec,
+    SlidingWindowSpec,
+)
 
 from .qwen2 import Qwen2MLP as Qwen3MLP
 from .qwen3 import Qwen3ForCausalLM
@@ -60,10 +65,12 @@ def _resolve_layer_attention(
     +----------------------+-------------------------+--------------------------------+
     | Config               | ``layer_type``          | *``causal``                    |
     +======================+=========================+================================+
-    | ``layer_types``      | SWA if ``use_swa``      | True if ``layer_types[i]=SWA`` |
-    |                      | else ``layer_types[i]`` | else False                     |
+    | ``layer_types``      | ``layer_types[i]``      | True if ``layer_types[i]=SWA`` |
+    | (any SWA entries,    | per layer               | else False                     |
+    | uniform or mixed)    |                         |                                |
     +----------------------+-------------------------+--------------------------------+
     | ``layer_types=None`` | SWA                     | False                          |
+    | or all-full,         |                         |                                |
     | + ``use_swa=True``   |                         |                                |
     +----------------------+-------------------------+--------------------------------+
     | ``layer_types=None`` | Full                    | False                          |
@@ -75,6 +82,7 @@ def _resolve_layer_attention(
     - XiaomiMiMo/MiMo-V2.5-Pro-FP4-DFlash (sets "use_swa", assumes non-causal)
     - z-lab/gemma-4-31B-it-DFlash (has mixed layer types, assumes causal only for SWA)
     - z-lab/Qwen3.5-9B-DFlash ("standard" DFlash, all full attn, assumes non-causal)
+    - z-lab/Qwen3.6-27B-DFlash (mixed: 4x sliding_attention + 1x full_attention)
     """
     dflash_config = getattr(config, "dflash_config", None) or {}
     layer_types = getattr(config, "layer_types", None)
@@ -82,19 +90,9 @@ def _resolve_layer_attention(
     config_causal = dflash_config.get("causal", None)
 
     SLIDING_ATTENTION = "sliding_attention"
-    any_sliding = False
-    if layer_types is not None:
-        num_sliding = sum(lt == SLIDING_ATTENTION for lt in layer_types)
-        any_sliding = num_sliding > 0
-        all_sliding = num_sliding == len(layer_types)
-        if any_sliding and not all_sliding:
-            # Mixed sliding/full attention needs per-layer causal metadata and
-            # multiple KV-cache groups, which DFlash does not yet support.
-            raise NotImplementedError(
-                "DFlash does not yet support mixed sliding/full attention via "
-                "layer_types; see "
-                "https://github.com/vllm-project/vllm/issues/40898."
-            )
+    any_sliding = layer_types is not None and any(
+        lt == SLIDING_ATTENTION for lt in layer_types
+    )
 
     default_causal = False
     if layer_types is None or (use_swa and not any_sliding):
@@ -120,6 +118,30 @@ def _resolve_layer_attention(
 
     causal = config_causal if config_causal is not None else default_causal
     return sliding_window, causal
+
+
+class DFlashAttention(Attention):
+    """Attention with DFlash-specific KV allocation semantics.
+
+    The compute path keeps the layer's configured sliding window. The KV cache
+    spec is widened to full attention because DFlash writes every context KV
+    before drafting and cannot evict old context blocks from draft layers.
+    """
+
+    def get_kv_cache_spec(self, vllm_config: VllmConfig) -> KVCacheSpec | None:
+        spec = super().get_kv_cache_spec(vllm_config)
+        if isinstance(spec, SlidingWindowSpec):
+            return FullAttentionSpec(
+                block_size=spec.block_size,
+                num_kv_heads=spec.num_kv_heads,
+                head_size=spec.head_size,
+                head_size_v=spec.head_size_v,
+                dtype=spec.dtype,
+                kv_quant_mode=spec.kv_quant_mode,
+                page_size_padded=spec.page_size_padded,
+                indexes_kv_by_block_stride=spec.indexes_kv_by_block_stride,
+            )
+        return spec
 
 
 class DFlashQwen3Attention(nn.Module):
@@ -195,7 +217,7 @@ class DFlashQwen3Attention(nn.Module):
         )
 
         self.sliding_window = sliding_window
-        self.attn = Attention(
+        self.attn = DFlashAttention(
             self.num_heads,
             self.head_dim,
             self.scaling,
@@ -374,6 +396,13 @@ class DFlashQwen3Model(nn.Module):
                 for layer_idx in range(self.config.num_hidden_layers)
             ]
         )
+        # Sliding layers per _resolve_layer_attention (covers both mixed
+        # layer_types and the uniform dflash_config.use_swa case).
+        self.sliding_attention_layer_names = {
+            layer.self_attn.attn.layer_name
+            for layer in self.layers
+            if layer.self_attn.sliding_window is not None
+        }
         if self.use_aux_hidden_state:
             num_features_to_use = self.config.num_hidden_layers
             if "target_layer_ids" in drafter_config:
@@ -522,7 +551,10 @@ class DFlashQwen3Model(nn.Module):
         self,
         context_states: torch.Tensor,
         context_positions: torch.Tensor,
-        context_slot_mapping: torch.Tensor | list[torch.Tensor | None] | None = None,
+        context_slot_mapping: torch.Tensor
+        | list[torch.Tensor | None]
+        | Mapping[str, torch.Tensor]
+        | None = None,
     ) -> None:
         """Precompute K/V for context states write them into each layer's KV cache.
 
@@ -576,12 +608,17 @@ class DFlashQwen3Model(nn.Module):
         all_k_final = all_k_flat.view(L, num_ctx, nkv, hd)
         per_layer = isinstance(context_slot_mapping, (list, tuple))
         for i in range(L):
-            slot_mapping = (
-                context_slot_mapping[i] if per_layer else context_slot_mapping
-            )
+            attn = self._attn_layers[i]
+            if per_layer:
+                slot_mapping = context_slot_mapping[i]
+            elif isinstance(context_slot_mapping, Mapping):
+                # Per-KV-group slot mappings keyed by layer name (mixed
+                # sliding/full drafts span multiple KV cache groups).
+                slot_mapping = context_slot_mapping.get(attn.layer_name)
+            else:
+                slot_mapping = context_slot_mapping
             if slot_mapping is None:
                 continue  # dummy run: skip cache ops
-            attn = self._attn_layers[i]
             kv_cache = attn.kv_cache
             attn.impl.do_kv_cache_update(
                 attn,
@@ -682,7 +719,8 @@ class DFlashQwen3ForCausalLM(Qwen3ForCausalLM):
             prefix=maybe_prefix(prefix, "lm_head"),
         )
         self.logits_processor = LogitsProcessor(
-            self.config.draft_vocab_size, scale=logit_scale
+            self.config.draft_vocab_size,
+            scale=logit_scale,
         )
         target_vocab_size = vllm_config.model_config.get_vocab_size()
         if self.config.draft_vocab_size != target_vocab_size:
@@ -730,12 +768,19 @@ class DFlashQwen3ForCausalLM(Qwen3ForCausalLM):
         self,
         context_states: torch.Tensor,
         context_positions: torch.Tensor,
-        context_slot_mapping: torch.Tensor | list[torch.Tensor | None] | None = None,
+        context_slot_mapping: torch.Tensor
+        | list[torch.Tensor | None]
+        | Mapping[str, torch.Tensor]
+        | None = None,
     ) -> None:
         """Precompute projected + RoPE'd K/V and write to cache."""
         self.model.precompute_and_store_context_kv(
             context_states, context_positions, context_slot_mapping
         )
+
+    @property
+    def sliding_attention_layer_names(self) -> set[str]:
+        return self.model.sliding_attention_layer_names
 
     def combine_hidden_states(
         self,

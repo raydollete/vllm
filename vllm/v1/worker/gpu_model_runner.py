@@ -2493,6 +2493,14 @@ class GPUModelRunner(
         # Prepare the attention metadata for each KV cache group and make layers
         # in the same group share the same metadata.
         spec_decode_common_attn_metadata = None
+        dflash_drafter = (
+            self.drafter
+            if self.speculative_config and isinstance(self.drafter, DFlashProposer)
+            else None
+        )
+        if dflash_drafter is not None:
+            dflash_drafter.clear_draft_block_tables()
+
         for kv_cache_gid, kv_cache_group in enumerate(kv_cache_groups):
             cm = copy(cm_base)  # shallow copy
 
@@ -2507,6 +2515,11 @@ class GPUModelRunner(
             if kv_cache_gid > 0:
                 cm.block_table_tensor = _get_block_table(kv_cache_gid)
                 cm.slot_mapping = slot_mappings[kv_cache_gid]
+
+            if dflash_drafter is not None:
+                dflash_drafter.set_draft_block_table(
+                    kv_cache_gid, cm.block_table_tensor
+                )
 
             if self.speculative_config and spec_decode_common_attn_metadata is None:
                 if isinstance(
@@ -6794,6 +6807,7 @@ class GPUModelRunner(
             attn_backend: type[AttentionBackend]
             kv_cache_spec: KVCacheSpec
             num_heads_q: int
+            metadata_group_key: tuple[Any, ...]
 
         def get_attn_backends_for_group(
             kv_cache_group_spec: KVCacheGroupSpec,
@@ -6829,9 +6843,20 @@ class GPUModelRunner(
                 # fallback can never spuriously merge them with attention
                 # layers.
                 num_heads_q = getattr(layers[layer_name], "num_heads", 0)
-                key = (full_cls_name, layer_kv_cache_spec, num_heads_q)
+                # Also split on the backend's metadata group key (e.g.
+                # per-window_left for FlashInfer) so layers whose metadata
+                # cannot share one builder get separate groups.
+                metadata_group_key = attn_backend.get_metadata_group_key(
+                    layers[layer_name]
+                )
+                key = (
+                    full_cls_name,
+                    layer_kv_cache_spec,
+                    num_heads_q,
+                    metadata_group_key,
+                )
                 attn_backends[key] = AttentionGroupKey(
-                    attn_backend, layer_kv_cache_spec, num_heads_q
+                    attn_backend, layer_kv_cache_spec, num_heads_q, metadata_group_key
                 )
                 attn_backend_layers[key].append(layer_name)
             return (
