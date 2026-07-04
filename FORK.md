@@ -13,7 +13,7 @@ we carry.
 
 ## Branch model
 
-```
+```text
 base/current (tag → any upstream commit: release tag, upstream/main, SHA, or PR head)
   └─ patch/01-<topic>
        └─ patch/02-<topic>
@@ -32,9 +32,9 @@ base/current (tag → any upstream commit: release tag, upstream/main, SHA, or P
   independent patches may sit in any order.
 - **Stack tip** — the branch you build/run and pass to `rebase.sh` as
   `STACK_TIP`. Pick ONE of:
-  - **the topmost `patch/NN` branch** (default, simplest) — use this when all
+    - **the topmost `patch/NN` branch** (default, simplest) — use this when all
     your changes are patches. Set `STACK_TIP=patch/NN-top`.
-  - **a separate `deploy` branch** — only if it carries deploy-only commits
+    - **a separate `deploy` branch** — only if it carries deploy-only commits
     that never go upstream (private config, local defaults). It **must sit
     strictly above** the topmost patch (have at least one commit of its own).
 
@@ -51,30 +51,97 @@ base/current (tag → any upstream commit: release tag, upstream/main, SHA, or P
 Keep this table current. When a patch merges upstream, delete its branch and
 remove its row — the next rebase absorbs it via the new base.
 
-| Branch                              | Purpose                                              | Intent    | Upstream tracking → drop when it merges |
-| ----------------------------------- | ---------------------------------------------------- | --------- | --------------------------------------- |
-| `patch/00-fork-tooling`             | Fork machinery (FORK.md + scripts)                   | permanent | — (never upstreamed) |
+| Branch | Purpose | Intent | Upstream tracking → drop when it merges |
+| --- | --- | --- | --- |
+| `patch/00-fork-tooling` | Fork machinery (FORK.md + scripts) | permanent | — (never upstreamed) |
 | `patch/01-precommit-grammar-filter` | Spec-decode × reasoning: drop maskless post-boundary bonus tokens before they enter the response | tracking | **#43424** — this *is* that PR (Adam Moisa); rival impl **#36138**. Do **not** open our own. Drop when either merges. |
 | `patch/02-xgrammar-allow-propertynames` | Allow JSON schemas with `propertyNames` through the xgrammar backend | tracking | **#42904** — different (better) impl: adds real support vs. our blocklist removal. Local override only; drop & use native support when it merges. |
 | `patch/03-mtp-prefix-mamba-accuracy` | Exclude final partially-accepted block from mamba cache-hit lookup under MTP/eagle | tracking | **#43650** (zack041). Drop when it merges. |
 | `patch/04-uniform-batch-prefills` | `_is_uniform_decode` also verifies no request is still prefilling | tracking | **#39945** (Benjamin Chislett). Drop when it merges. |
 | `patch/05-thinking-budget-reasoning-end` | Detect reasoning end via parser's intrinsic marker under `thinking_token_budget` | tracking | **#43210** (Sebastian Schoennenbeck). Conflict-resolved against main's incremental scan; re-check on rebase. Drop when it merges. |
-| `patch/06-streaming-stop-tool-parsing` | Flush tool-parser-buffered text as content when generation stops mid-parse | tracking | **#42213** (dtnguyen). Classic parsers only; engine parsers no-op safely. Drop when it merges. |
+| `patch/06-streaming-stop-tool-parsing` | Flush tool-parser-buffered text as content when generation stops mid-parse | tracking | **#42213** (dtnguyen). Classic parsers only; engine parsers (incl. prod `qwen3_xml`) no-op safely here — their end-of-stream flush is `_flush_engine_parsers` (`vllm/parser/abstract_parser.py:916-957`), not this patch. Drop when it merges. |
 | `patch/07-mamba-block-table-fusion` | Triton-fused mamba align-mode block-table gather | tracking | **#38020** (Jialin Ouyang) — approved upstream, likely merges soon. Drop when it merges. |
 | `patch/08-gdn-inplace-ssm-state` | In-place SSM state access in GDN chunk prefill (Qwen3.5/Qwen3-Next/OLMo-Hybrid) | tracking | **#41824** (kermit). Drop when it merges. |
+| `patch/09-dflash-swa` | DFlash mixed sliding/full `layer_types` draft support + FlashInfer per-`window_left` metadata groups (restores v15 DFlash-8) | tracking | **#40898** (jianc99) + **#43200** (gq112, stacked on it). Ported as ONE patch from `refs/pull/43200/head`. Drop when both merge; if #40898 lands first, shrinks to the #43200 delta at the next rebase. |
+| `patch/10-greedy-rejection-shortcut` | Rejection-sampler shortcut for all-greedy speculative sampling | tracking | **#38007** (zzaebok). Drop when it merges. |
+| `patch/11-gdn-inproj-fusion` | Fuse Qwen3.5 GDN `in_proj_ba` into 6-way `in_proj` MergedColumnParallelLinear | tracking | **#41457** (jhsmith409). On the critical path — prod target Qwen3.6-27B-FP8 is itself GDN-hybrid. Drop when it merges. |
+| `patch/12-gdn-qkv-compile` | Re-enable torch.compile for `rearrange_mixed_qkv` in GDN linear attention | tracking | **#42241** (tjtanaa). Drop when it merges. |
+| `patch/13-mamba-postprocess-skip` | Skip mamba postprocess kernel when no block boundary can be crossed | tracking | donor commit `df2c23014` (Tony), adapts **#42574** (mamingyuan-nv) atop patch/07. Drop when #42574 merges. |
 
-Provenance note: patches 03–08 were triaged out of `repne/vllm` branch
-`v15-dflash` (2026-07-03). Everything DFlash-specific from that branch is
-already in upstream main (#43081, #46104, #43733, #42692, …) — no DFlash
-patches are carried.
+Provenance note (v15-dflash triage 2026-07-03; **corrected 2026-07-04**):
+patches 03–13 were triaged out of `repne/vllm` branch `v15-dflash`. Capability
+assertions (cite the SHA + the capability + the config that exercises it, and an
+explicit "NOT covered" line for any sibling behind an open PR):
+
+- **Uniform-`use_swa` DFlash SWA IS upstream** — #46104 (`9969466a5`, merged
+  2026-07-01) adds `_resolve_layer_attention`, covering the MiMo shape
+  (`layer_types=None` + `use_swa`, and all-`full_attention`). Exercised by
+  MiMo-family drafters (e.g. `XiaomiMiMo/MiMo-V2.5-Pro-FP4-DFlash`).
+- **Mixed per-layer `layer_types` DFlash SWA was NOT upstream** — it is gated
+  behind the still-open **#40898** (+ FlashInfer **#43200**), which #46104's own
+  raise at `qwen3_dflash.py:93` explicitly defers to. The original 2026-07-03
+  triage read #46104's *title* as full coverage and dropped #40898, crashing the
+  production DFlash-8 drafter (`z-lab/Qwen3.6-27B-DFlash`, `layer_types =
+  4×sliding_attention@2048 + 1×full_attention`) at engine start. Restored as
+  **`patch/09-dflash-swa`**.
+- The four still-open v15 perf changes dropped in the same triage are restored as
+  **patches 10–13** (see rows above).
+- Full 22-PR + 3-donor-commit disposition — including the four "fixed on main"
+  supersession claims **re-verified against this base** (#42875/#43074 N/A,
+  #39615 covered by the parser engine, #43349 optimization present) and the
+  open reasoning-count remainder (#45787/#45802, enforcement unaffected) — is
+  recorded in `openspec/changes/restore-v15-dflash-swa-gaps/` (proposal.md
+  §Blast-Radius 11 + tasks.md §7). See the **Donor-branch triage** procedure
+  below for how this class of miss is now prevented.
 
 Intent legend:
+
 - **permanent** — carried indefinitely; no upstream equivalent expected.
 - **pending** — our own change we intend to submit upstream; drops out once *our* PR merges.
 - **tracking** — an upstream PR already covers this (ours or someone else's).
   We do **not** open a duplicate (AGENTS.md); we carry the patch only until that
   PR lands, then delete the branch + row and rebase so upstream's version takes
   over. The "Upstream tracking" cell names the PR to watch.
+
+## Donor-branch triage
+
+When adopting patches from a **donor branch** (a third-party fork such as
+`repne/vllm:v15-dflash` that itself merged unmerged upstream PRs), classify every
+carried change **mechanically**. Reading PR titles is exactly how the 2026-07-03
+triage concluded "DFlash is already upstream" and dropped the open #40898 (see the
+provenance note above). These steps are the guardrail; none may be skipped.
+
+1. **Enumerate every PR-head merge** the donor branch carries:
+   ```bash
+   git log --grep 'refs/pull' <donor>/v15-dflash
+   ```
+2. **Get each PR's real state — never infer it from the title:**
+   ```bash
+   gh pr view N --repo vllm-project/vllm --json state,mergedAt
+   ```
+   - `MERGED` → absorbed once the base is new enough; drop.
+   - `OPEN` / `CLOSED` → requires an explicit **carry-or-drop** disposition with a
+     one-line rationale. A `CLOSED` PR is **not** automatically "covered" — it may
+     be superseded, or closed unfixed. Verify via step 3.
+3. **Supersession = read the superseding diff, not the title.** "Fixed on main" /
+   "covered by #X" holds only if #X's *diff* delivers the same capability for
+   *our* config shape. Record the merged SHA, the capability, and the config that
+   exercises it. If a sibling capability is still behind an open PR, write an
+   explicit "NOT covered" line (the #46104-covers-uniform-SWA / #40898-still-open
+   trap).
+4. **Sweep for donor-authored commits** not attached to any PR head:
+   ```bash
+   git rev-list --no-merges <donor>/v15-dflash ^upstream/main \
+     $(for n in <every-PR-number>; do echo "^refs/remotes/upstream/pr-$n"; done)
+   ```
+   Each survivor is a donor-original change — carry it as a tracking patch against
+   the upstream PR it adapts (e.g. `patch/13` ← `df2c23014` → #42574) or drop it
+   with a reason.
+
+Every PR must end in exactly one bucket — merged-and-dropped, carried (with the
+PR to watch), or dropped-with-reason. None left unclassified. The inventory-audit
+script (`scripts/fork/audit-inventory.sh`) then fails CI if a carried patch's
+tracked PR later leaves the OPEN state.
 
 ## One-time setup
 
@@ -215,6 +282,22 @@ uv pip install -e . --torch-backend=auto
 # plus any test covering a patched area, e.g.:
 .venv/bin/python -m pytest tests/path/to/test_file.py -v
 ```
+
+### Post-rebase smoke-boot matrix (required before a base is declared good)
+
+A rebase + overlay build is **not "good"** until **every production serve
+profile** boots to a serving state on the new image. Load-only boots are cheap
+and would have caught the DFlash-8 mixed-`layer_types` crash in seconds. Minimum
+matrix (run after `build-image.sh`, before deploying):
+
+| Profile | Config (delta from the common Qwen3.6-27B-FP8 target) | Boot gate |
+| ------- | ----------------------------------------------------- | --------- |
+| **P1 — MTP-3** | `speculative_config={method: mtp, num_speculative_tokens: 3}` | `/v1/models` responds |
+| **P2 — DFlash-8** | `speculative_config={method: dflash, num_speculative_tokens: 8, model: z-lab/Qwen3.6-27B-DFlash, attention_backend: FLASHINFER, draft_sample_method: greedy}`, `kv_cache_dtype=fp8_e4m3`, `max_model_len=262144`, `block_size=32`, prefix caching, `cudagraph_mode=FULL_AND_PIECEWISE` | `/v1/models` responds; **no** `NotImplementedError`/causal-assert from the DFlash path |
+
+If any profile fails to reach serving state, **reject the base (or the offending
+patch)** and record the result against the build provenance tag (`build/<date>`).
+Deploy only after every profile is green.
 
 ## Invariants (things that should always hold)
 
