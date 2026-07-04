@@ -47,6 +47,7 @@ from vllm.model_executor.layers.mamba.ops.causal_conv1d import (
     causal_conv1d_fn,
     causal_conv1d_update,
 )
+from vllm.model_executor.layers.mamba.ops.gdn_ops import rearrange_mixed_qkv
 from vllm.model_executor.layers.quantization import QuantizationConfig
 from vllm.model_executor.layers.quantization.auto_awq import AutoAWQConfig
 from vllm.model_executor.layers.quantization.auto_gptq import AutoGPTQConfig
@@ -1029,38 +1030,18 @@ class QwenGatedDeltaNetAttention(GatedDeltaNetAttention):
     def rearrange_mixed_qkv(self, mixed_qkv):
         """Split packed qkv into contiguous (1, seq, heads, dim) tensors.
 
-        The original code used ``rearrange(x, "l (h d) -> 1 l h d", d=...)``
-        followed by ``.contiguous()`` on each tensor.  This version flattens
-        all three splits into a single buffer via ``torch.cat`` so that
-        torch.compile emits one Triton copy kernel instead of three separate
-        contiguous() calls.
+        Delegates to ``ops.gdn_ops.rearrange_mixed_qkv``, which runs a
+        ``torch.compile``d single-kernel copy outside CUDA graph capture and
+        the eager equivalent during capture.
         """
-        if mixed_qkv is None:
-            return None, None, None
-
-        seq_len = mixed_qkv.shape[0]
-        q_dim = self.key_dim // self.tp_size
-        k_dim = self.key_dim // self.tp_size
-        v_dim = self.value_dim // self.tp_size
-
-        query, key, value = torch.split(mixed_qkv, [q_dim, k_dim, v_dim], dim=-1)
-
-        fused = torch.cat(
-            [query.reshape(-1), key.reshape(-1), value.reshape(-1)], dim=0
+        return rearrange_mixed_qkv(
+            mixed_qkv,
+            self.key_dim,
+            self.value_dim,
+            self.tp_size,
+            self.head_k_dim,
+            self.head_v_dim,
         )
-
-        q_size = seq_len * q_dim
-        k_size = seq_len * k_dim
-
-        q_contig = fused[0:q_size]
-        k_contig = fused[q_size : q_size + k_size]
-        v_contig = fused[q_size + k_size :]
-
-        query = q_contig.view(1, seq_len, -1, self.head_k_dim)
-        key = k_contig.view(1, seq_len, -1, self.head_k_dim)
-        value = v_contig.view(1, seq_len, -1, self.head_v_dim)
-
-        return query, key, value
 
     def forward(
         self,
@@ -1387,6 +1368,9 @@ class QwenGatedDeltaNetAttention(GatedDeltaNetAttention):
             chunk_indices, chunk_offsets = prepare_metadata_cutedsl(cu_seqlens, T)
 
         try:
+            # Warm up the torch.compile'd qkv rearrange so compilation happens
+            # at boot instead of on the first request.
+            self.rearrange_mixed_qkv(dummy_mixed_qkv)
             self.chunk_gated_delta_rule(
                 q=q,
                 k=k,
