@@ -99,5 +99,16 @@ fi
 
 say "Building ${image_tag} on vllm/vllm-openai:${version}"
 "${build_cmd[@]}"
+
+# Record the build in git: an annotated build/<tag-suffix> tag pinning the
+# exact tip commit (the image's revision label dangles once the stack is
+# rebased; the tag keeps it alive and diffable). Annotation = the manifest.
+build_tag="build/${image_tag#*:}"
+git tag -f -a "${build_tag}" "refs/heads/${STACK_TIP}" -m "$(
+  printf 'image: %s\nbase:  vllm/vllm-openai:%s\n\npatches:\n' "${image_tag}" "${version}"
+  git log --oneline --reverse "${BASE_REF}..refs/heads/${STACK_TIP}" | sed 's/^/  /'
+)"
+say "Tagged ${build_tag} -> $(git rev-parse --short "refs/heads/${STACK_TIP}") (git show ${build_tag} for the manifest)"
+
 say "Done. Drop-in replacement for vllm/vllm-openai:${version}:"
 say "  docker run --gpus all ... ${image_tag} <same args as official image>"
