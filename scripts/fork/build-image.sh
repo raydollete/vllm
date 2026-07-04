@@ -9,7 +9,9 @@
 #                   The stack base (base/current) must sit exactly on this
 #                   tag — rebase first if not:
 #                     STACK_TIP=<tip> scripts/fork/rebase.sh <vllm-version>
-#   [image-tag]     output tag (default: vllm-openai-fork:<version>-<tipsha>)
+#   [image-tag]     output tag (default: vllm:<build-date>, e.g. vllm:2026-07-03;
+#                   the stack tip SHA stays traceable via the image label
+#                   org.opencontainers.image.revision)
 #
 # Env:
 #   STACK_TIP   stack tip branch (default: deploy)
@@ -39,8 +41,7 @@ git rev-parse --verify --quiet "${BASE_REF}" >/dev/null \
 git rev-parse --verify --quiet "refs/heads/${STACK_TIP}" >/dev/null \
   || die "Stack tip branch '${STACK_TIP}' does not exist (set STACK_TIP=...)."
 
-tip_sha="$(git rev-parse --short "refs/heads/${STACK_TIP}")"
-image_tag="${2:-vllm-openai-fork:${version//\//-}-${tip_sha}}"
+image_tag="${2:-vllm:$(date +%F)}"
 
 # --- Base alignment: the overlay diff must be against the SAME version as the
 # official base image, or we'd silently mix versions.
