@@ -162,11 +162,12 @@ STACK_TIP=<tip> scripts/fork/rebase.sh v0.24.0
 
 # 2. Build (file list derived from git, staged from the tip commit):
 STACK_TIP=<tip> scripts/fork/build-image.sh v0.24.0
-#    → vllm-openai-fork:v0.24.0-<tipsha>, labeled with the stack SHA
+#    → vllm:<build-date> (e.g. vllm:2026-07-03), labeled with the stack SHA
 #    (org.opencontainers.image.revision). DRY_RUN=1 to preview.
+#    Pass a second arg to override the tag.
 
 # 3. Run anywhere the official image ran, same args:
-docker run --gpus all ... vllm-openai-fork:v0.24.0-<tipsha> ...
+docker run --gpus all ... vllm:2026-07-03 ...
 ```
 
 Safety rails built into `build-image.sh` / `docker/Dockerfile.fork`:
