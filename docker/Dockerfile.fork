@@ -15,6 +15,9 @@ ARG EXPECTED_VLLM_VERSION
 #   prefix   — release bases ("0.24.0" vs "0.24.0")
 #   contains — nightly bases ("+g4080263bb" vs "0.23.1rc1.dev748+g4080263bb")
 ARG VERSION_MATCH=prefix
+# Space-separated overlay paths that the stack ADDS rather than modifies.
+# They get the inverse existence check (see below).
+ARG NEW_FILES=""
 ARG STACK_TIP_SHA
 
 # NOTE: nothing here may `import vllm`. `docker build` has no GPU, and in
@@ -39,10 +42,18 @@ RUN set -eu; \
       *) echo "FATAL: unknown VERSION_MATCH '${VERSION_MATCH}'" >&2; exit 1 ;; \
     esac; \
     (cd /tmp/fork-overlay && find vllm -type f) | while read -r f; do \
-      test -f "${target}/${f}" || { echo "FATAL: ${f} does not exist in the image — overlay/base mismatch" >&2; exit 1; }; \
+      case " ${NEW_FILES} " in \
+        *" ${f} "*) \
+          test ! -e "${target}/${f}" || { echo "FATAL: ${f} is carried as a NEW file but already exists in the image — upstream may have added it; re-triage the patch" >&2; exit 1; }; \
+          mkdir -p "$(dirname "${target}/${f}")"; \
+          verb="added" ;; \
+        *) \
+          test -f "${target}/${f}" || { echo "FATAL: ${f} does not exist in the image — overlay/base mismatch" >&2; exit 1; }; \
+          verb="patched" ;; \
+      esac; \
       install -m 0644 "/tmp/fork-overlay/${f}" "${target}/${f}"; \
       python3 -m py_compile "${target}/${f}" || { echo "FATAL: ${f} does not compile" >&2; exit 1; }; \
-      echo "  patched ${f}"; \
+      echo "  ${verb} ${f}"; \
     done; \
     rm -rf /tmp/fork-overlay; \
     find "${target}/vllm" -name '__pycache__' -prune -exec rm -rf {} +

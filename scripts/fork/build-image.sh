@@ -87,8 +87,24 @@ for f in "${changed[@]}"; do
 done
 [[ ${#overlay_files[@]} -gt 0 ]] || die "Stack has no vllm/*.py changes to overlay."
 
+# Files the stack *adds* are exempt from the "must already exist in the image"
+# rail (that rail is the base-mismatch canary for *modified* files). They get
+# the inverse check instead — see Dockerfile.fork.
+mapfile -t added < <(git diff --diff-filter=A --name-only "${BASE_REF}" "refs/heads/${STACK_TIP}")
+new_files=""
+for f in "${overlay_files[@]}"; do
+  for a in "${added[@]}"; do
+    [[ "$f" == "$a" ]] && new_files+="${f} " && break
+  done
+done
+
 say "Overlaying ${#overlay_files[@]} file(s) from ${BASE_REF}..${STACK_TIP}:"
-printf '    %s\n' "${overlay_files[@]}"
+for f in "${overlay_files[@]}"; do
+  case " ${new_files} " in
+    *" ${f} "*) printf '    %s  (new)\n' "$f" ;;
+    *)          printf '    %s\n' "$f" ;;
+  esac
+done
 
 # --- Stage a clean build context from the TIP COMMIT (not the working tree,
 # which may be on another branch or dirty).
@@ -113,6 +129,7 @@ build_cmd=(docker build
   --build-arg "VLLM_VERSION=${image_ref}"
   --build-arg "EXPECTED_VLLM_VERSION=${expected_version}"
   --build-arg "VERSION_MATCH=${version_match}"
+  --build-arg "NEW_FILES=${new_files% }"
   --build-arg "STACK_TIP_SHA=$(git rev-parse "refs/heads/${STACK_TIP}")"
   -t "${image_tag}"
   "${ctx}")

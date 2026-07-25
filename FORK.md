@@ -338,10 +338,13 @@ Safety rails built into `build-image.sh` / `docker/Dockerfile.fork`:
   `setup.py`, etc.; that requires the full source build (`docker/Dockerfile`).
 - Overlay is staged from the **tip commit** via `git archive`, never from the
   (possibly dirty / different-branch) working tree.
-- In-image checks: installed version must match the expected base, every
-  overlaid file must already exist in the image and byte-compile, and stale
-  `__pycache__` is purged. The patched modules must then import in the
-  post-build GPU check.
+- In-image checks: installed version must match the expected base; every
+  overlaid file must byte-compile; stale `__pycache__` is purged. Existence is
+  checked in **both** directions — a file the stack *modifies* must already
+  exist (base-mismatch canary), and a file the stack *adds* must **not** already
+  exist (if it does, upstream added it too — re-triage the patch before
+  clobbering theirs). The patched modules must then import in the post-build
+  GPU check.
 
 Day-to-day you can keep developing against `upstream/main`; hop to the release
 tag or nightly sha only at packaging time (`rerere` makes the round-trip cheap).
