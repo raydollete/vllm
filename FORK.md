@@ -223,12 +223,18 @@ While every patch is pure Python, ship as an **overlay image**: official
 installed package. Seconds to build, byte-identical kernels, same
 entrypoint/env/ports as the official image.
 
+Official images exist for **releases** (`vllm/vllm-openai:v0.24.0`) and for
+**nightlies** (`vllm/vllm-openai:nightly-<full-sha>`, published daily per
+`upstream/main` commit). `build-image.sh` takes either.
+
 ```bash
-# 1. Official images exist per release — move the stack onto that release:
-STACK_TIP=<tip> scripts/fork/rebase.sh v0.24.0
+# 1. Move the stack onto the commit the official image was built from:
+STACK_TIP=<tip> scripts/fork/rebase.sh v0.24.0                  # a release …
+STACK_TIP=<tip> scripts/fork/rebase.sh 4080263bb2c5d10de…       # … or a nightly sha
 
 # 2. Build (file list derived from git, staged from the tip commit):
 STACK_TIP=<tip> scripts/fork/build-image.sh v0.24.0
+STACK_TIP=<tip> scripts/fork/build-image.sh nightly-4080263bb2c5d10de…
 #    → vllm:<build-date> (e.g. vllm:2026-07-03), labeled with the stack SHA
 #    (org.opencontainers.image.revision). DRY_RUN=1 to preview.
 #    Pass a second arg to override the tag.
@@ -236,6 +242,14 @@ STACK_TIP=<tip> scripts/fork/build-image.sh v0.24.0
 # 3. Run anywhere the official image ran, same args:
 docker run --gpus all ... vllm:2026-07-03 ...
 ```
+
+> **Nightly gotcha — no `import vllm` at build time.** In nightly images
+> `import vllm` fails without a visible GPU (circular import in
+> `vllm.utils.torch_utils`), and `docker build` has no GPU. `Dockerfile.fork`
+> therefore resolves the install path with `importlib.util.find_spec`, the
+> version with `importlib.metadata`, and validates each overlaid file with
+> `py_compile`. The real import check runs *after* the build, from
+> `build-image.sh`, via `docker run --gpus all` (`SKIP_IMPORT_CHECK=1` opts out).
 
 ### Build provenance — what is in an image?
 
@@ -255,17 +269,20 @@ hand-maintained ledger:
 Safety rails built into `build-image.sh` / `docker/Dockerfile.fork`:
 
 - **Base alignment enforced** — refuses to build unless `base/current` sits
-  exactly on the version tag matching the base image (no silent version mixing).
+  exactly on the commit matching the base image (no silent version mixing).
+  Releases match `vllm.__version__` by prefix; nightlies by their `+g<sha>`
+  suffix.
 - **Pure-Python enforced** — refuses if the stack touches `csrc/`, `*.cu`,
   `setup.py`, etc.; that requires the full source build (`docker/Dockerfile`).
 - Overlay is staged from the **tip commit** via `git archive`, never from the
   (possibly dirty / different-branch) working tree.
-- In-image checks: installed `vllm.__version__` must match the expected base,
-  every overlaid file must already exist in the image, stale `__pycache__` is
-  purged, and the patched modules must import.
+- In-image checks: installed version must match the expected base, every
+  overlaid file must already exist in the image and byte-compile, and stale
+  `__pycache__` is purged. The patched modules must then import in the
+  post-build GPU check.
 
 Day-to-day you can keep developing against `upstream/main`; hop to the release
-tag only at packaging time (`rerere` makes the round-trip cheap).
+tag or nightly sha only at packaging time (`rerere` makes the round-trip cheap).
 
 ## Build & verify after a rebase
 

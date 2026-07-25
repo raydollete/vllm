@@ -11,27 +11,41 @@ FROM vllm/vllm-openai:${VLLM_VERSION}
 
 ARG VLLM_VERSION
 ARG EXPECTED_VLLM_VERSION
+# How to match EXPECTED_VLLM_VERSION against the installed vllm.__version__:
+#   prefix   — release bases ("0.24.0" vs "0.24.0")
+#   contains — nightly bases ("+g4080263bb" vs "0.23.1rc1.dev748+g4080263bb")
+ARG VERSION_MATCH=prefix
 ARG STACK_TIP_SHA
 
+# NOTE: nothing here may `import vllm`. `docker build` has no GPU, and in
+# nightly images importing vllm without a visible GPU dies with a circular
+# import in vllm.utils.torch_utils. Resolve the package path via find_spec and
+# the version via importlib.metadata, and byte-compile (rather than import) the
+# overlaid files. build-image.sh runs the real import check after the build,
+# under `docker run --gpus all`.
+#
 # Overlay tree mirrors the repo layout (vllm/...); resolve the installed
 # package location at build time instead of hardcoding a site-packages path.
 COPY overlay/vllm/ /tmp/fork-overlay/vllm/
 RUN set -eu; \
-    target="$(python3 -c 'import os, vllm; print(os.path.dirname(os.path.dirname(vllm.__file__)))')"; \
+    target="$(python3 -c 'import importlib.util, os; s = importlib.util.find_spec("vllm"); print(os.path.dirname(os.path.dirname(s.origin)))')"; \
     echo "Overlaying onto ${target}/vllm"; \
-    installed="$(python3 -c 'import vllm; print(vllm.__version__)')"; \
-    case "$installed" in \
-      "$EXPECTED_VLLM_VERSION"*) ;; \
-      *) echo "FATAL: image has vllm ${installed}, stack base expects ${EXPECTED_VLLM_VERSION}*" >&2; exit 1 ;; \
+    installed="$(python3 -c 'import importlib.metadata; print(importlib.metadata.version("vllm"))')"; \
+    case "$VERSION_MATCH" in \
+      prefix) case "$installed" in "$EXPECTED_VLLM_VERSION"*) ;; \
+        *) echo "FATAL: image has vllm ${installed}, stack base expects ${EXPECTED_VLLM_VERSION}*" >&2; exit 1 ;; esac ;; \
+      contains) case "$installed" in *"$EXPECTED_VLLM_VERSION"*) ;; \
+        *) echo "FATAL: image has vllm ${installed}, stack base expects *${EXPECTED_VLLM_VERSION}*" >&2; exit 1 ;; esac ;; \
+      *) echo "FATAL: unknown VERSION_MATCH '${VERSION_MATCH}'" >&2; exit 1 ;; \
     esac; \
     (cd /tmp/fork-overlay && find vllm -type f) | while read -r f; do \
       test -f "${target}/${f}" || { echo "FATAL: ${f} does not exist in the image — overlay/base mismatch" >&2; exit 1; }; \
       install -m 0644 "/tmp/fork-overlay/${f}" "${target}/${f}"; \
+      python3 -m py_compile "${target}/${f}" || { echo "FATAL: ${f} does not compile" >&2; exit 1; }; \
       echo "  patched ${f}"; \
     done; \
     rm -rf /tmp/fork-overlay; \
-    find "${target}/vllm" -name '__pycache__' -prune -exec rm -rf {} +; \
-    python3 -c 'import vllm.v1.structured_output, vllm.v1.core.sched.scheduler; print("import check OK")'
+    find "${target}/vllm" -name '__pycache__' -prune -exec rm -rf {} +
 
 LABEL org.opencontainers.image.revision="${STACK_TIP_SHA}" \
       org.opencontainers.image.base.name="vllm/vllm-openai:${VLLM_VERSION}" \
