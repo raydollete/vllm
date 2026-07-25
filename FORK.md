@@ -377,6 +377,24 @@ matrix (run after `build-image.sh`, before deploying):
 | **P1 — MTP-3** | `speculative_config={method: mtp, num_speculative_tokens: 3}` | `/v1/models` responds; log shows the **V1** model runner |
 | **P2 — DFlash-8** | `speculative_config={method: dflash, num_speculative_tokens: 8, model: z-lab/Qwen3.6-27B-DFlash, attention_backend: FLASHINFER, draft_sample_method: greedy}`, `kv_cache_dtype=fp8_e4m3`, `max_model_len=262144`, `block_size=32`, prefix caching, `cudagraph_mode=FULL_AND_PIECEWISE` | `/v1/models` responds; **no** `NotImplementedError`/causal-assert from the DFlash path; log shows the **V2** model runner auto-selected |
 
+> **Deployment requirements the V2 switch introduced (DFlash-8 only), verified
+> on `build/2026-07-25`:**
+>
+> - **`VLLM_WSL2_ENABLE_PIN_MEMORY=1` is now mandatory** on this WSL2 box. V2
+>   allocates UVA buffers (`vllm/v1/worker/gpu/buffer_utils.py`), and
+>   `is_uva_available()` reduces to `is_pin_memory_available()`, which
+>   `CudaPlatformBase` disables by default under WSL even on kernels that
+>   support it (ours is 6.6.114.1, well past the 4.19.121 floor). Without the
+>   flag, engine init dies with `RuntimeError: UVA is not available`. V1 —
+>   i.e. MTP-3 — tolerates `pin_memory=False`, which is why P1 boots without it.
+> - **`thinking_token_budget` is unsupported on this profile.** V2 logs
+>   "Model Runner V2 does not yet support the thinking_token_budget request
+>   parameter". The suggested `VLLM_USE_V2_MODEL_RUNNER=0` is **not** an option
+>   here: forcing V1 puts the mixed-`layer_types` draft back on the path that
+>   raises `NotImplementedError`. On the current base, DFlash-8 cannot have both
+>   hybrid SWA and `thinking_token_budget`; `patch/05` is `V1 only` for the same
+>   reason.
+
 Record which runner each profile selected — that is what the inventory's
 **Runner** column is checked against. A profile silently changing runners across
 a rebase is how a carried patch goes inert without any inventory row moving.
