@@ -51,22 +51,21 @@ base/current (tag → any upstream commit: release tag, upstream/main, SHA, or P
 Keep this table current. When a patch merges upstream, delete its branch and
 remove its row — the next rebase absorbs it via the new base.
 
-| Branch | Purpose | Intent | Upstream tracking → drop when it merges |
-| --- | --- | --- | --- |
-| `patch/00-fork-tooling` | Fork machinery (FORK.md + scripts) | permanent | — (never upstreamed) |
-| `patch/01-precommit-grammar-filter` | Spec-decode × reasoning: drop maskless post-boundary bonus tokens before they enter the response | tracking | **#43424** — this *is* that PR (Adam Moisa); rival impl **#36138**. Do **not** open our own. Drop when either merges. |
-| `patch/02-xgrammar-allow-propertynames` | Allow JSON schemas with `propertyNames` through the xgrammar backend | tracking | **#42904** — different (better) impl: adds real support vs. our blocklist removal. Local override only; drop & use native support when it merges. |
-| `patch/03-mtp-prefix-mamba-accuracy` | Exclude final partially-accepted block from mamba cache-hit lookup under MTP/eagle | tracking | **#43650** (zack041). Drop when it merges. |
-| `patch/04-uniform-batch-prefills` | `_is_uniform_decode` also verifies no request is still prefilling | tracking | **#39945** (Benjamin Chislett). Drop when it merges. |
-| `patch/05-thinking-budget-reasoning-end` | Detect reasoning end via parser's intrinsic marker under `thinking_token_budget` | tracking | **#43210** (Sebastian Schoennenbeck). Conflict-resolved against main's incremental scan; re-check on rebase. Drop when it merges. |
-| `patch/06-streaming-stop-tool-parsing` | Flush tool-parser-buffered text as content when generation stops mid-parse | tracking | **#42213** (dtnguyen). Classic parsers only; engine parsers (incl. prod `qwen3_xml`) no-op safely here — their end-of-stream flush is `_flush_engine_parsers` (`vllm/parser/abstract_parser.py:916-957`), not this patch. Drop when it merges. |
-| `patch/07-mamba-block-table-fusion` | Triton-fused mamba align-mode block-table gather | tracking | **#38020** (Jialin Ouyang) — approved upstream, likely merges soon. Drop when it merges. |
-| `patch/08-gdn-inplace-ssm-state` | In-place SSM state access in GDN chunk prefill (Qwen3.5/Qwen3-Next/OLMo-Hybrid) | tracking | **#41824** (kermit). Drop when it merges. |
-| `patch/09-dflash-swa` | DFlash mixed sliding/full `layer_types` draft support + FlashInfer per-`window_left` metadata groups (restores v15 DFlash-8) | tracking | **#40898** (jianc99) + **#43200** (gq112, stacked on it). Ported as ONE patch from `refs/pull/43200/head`. Drop when both merge; if #40898 lands first, shrinks to the #43200 delta at the next rebase. |
-| `patch/10-greedy-rejection-shortcut` | Rejection-sampler shortcut for all-greedy speculative sampling | tracking | **#38007** (zzaebok). Drop when it merges. |
-| `patch/11-gdn-inproj-fusion` | Fuse Qwen3.5 GDN `in_proj_ba` into 6-way `in_proj` MergedColumnParallelLinear | tracking | **#41457** (jhsmith409). On the critical path — prod target Qwen3.6-27B-FP8 is itself GDN-hybrid. Drop when it merges. |
-| `patch/12-gdn-qkv-compile` | Re-enable torch.compile for `rearrange_mixed_qkv` in GDN linear attention | tracking | **#42241** (tjtanaa). Drop when it merges. |
-| `patch/13-mamba-postprocess-skip` | Skip mamba postprocess kernel when no block boundary can be crossed | tracking | donor commit `df2c23014` (Tony), adapts **#42574** (mamingyuan-nv) atop patch/07. Drop when #42574 merges. |
+| Branch | Purpose | Runner | Intent | Upstream tracking → drop when it merges |
+| --- | --- | --- | --- | --- |
+| `patch/00-fork-tooling` | Fork machinery (FORK.md + scripts) | — | permanent | — (never upstreamed) |
+| `patch/01-precommit-grammar-filter` | Spec-decode × reasoning: drop maskless post-boundary bonus tokens before they enter the response | shared | tracking | **#43424** — this *is* that PR (Adam Moisa); rival impl **#36138**. Do **not** open our own. Drop when either merges. |
+| `patch/02-xgrammar-allow-propertynames` | Allow JSON schemas with `propertyNames` through the xgrammar backend | shared | tracking | **#42904** — different (better) impl: adds real support vs. our blocklist removal. Local override only; drop & use native support when it merges. |
+| `patch/03-mtp-prefix-mamba-accuracy` | Exclude final partially-accepted block from mamba cache-hit lookup under MTP/eagle | shared | tracking | **#43650** (zack041). Drop when it merges. |
+| `patch/04-uniform-batch-prefills` | `_is_uniform_decode` also verifies no request is still prefilling | **V1 only** | tracking | **#39945** (Benjamin Chislett). Drop when it merges. |
+| `patch/05-thinking-budget-reasoning-end` | Detect reasoning end via parser's intrinsic marker under `thinking_token_budget` | **V1 only** | tracking | **#43210** (Sebastian Schoennenbeck). Conflict-resolved against main's incremental scan; re-check on rebase. Drop when it merges. |
+| `patch/06-streaming-stop-tool-parsing` | Flush tool-parser-buffered text as content when generation stops mid-parse | shared | tracking | **#42213** (dtnguyen). Classic parsers only; engine parsers (incl. prod `qwen3_xml`) no-op safely here — their end-of-stream flush is `_flush_engine_parsers` (`vllm/parser/abstract_parser.py:916-957`), not this patch. Drop when it merges. |
+| `patch/07-mamba-block-table-fusion` | Triton-fused mamba align-mode block-table gather | shared | tracking | **#38020** (Jialin Ouyang) — approved upstream, likely merges soon. Drop when it merges. |
+| `patch/08-gdn-inplace-ssm-state` | In-place SSM state access in GDN chunk prefill (Qwen3.5/Qwen3-Next/OLMo-Hybrid) | shared | tracking | **#41824** (kermit). Drop when it merges. |
+| `patch/10-greedy-rejection-shortcut` | Rejection-sampler shortcut for all-greedy speculative sampling | **V1 only** | tracking | **#38007** (zzaebok). Drop when it merges. |
+| `patch/11-gdn-inproj-fusion` | Fuse Qwen3.5 GDN `in_proj_ba` into 6-way `in_proj` MergedColumnParallelLinear | shared | tracking | **#41457** (jhsmith409). On the critical path — prod target Qwen3.6-27B-FP8 is itself GDN-hybrid. Drop when it merges. |
+| `patch/12-gdn-qkv-compile` | Re-enable torch.compile for `rearrange_mixed_qkv` in GDN linear attention | shared | tracking | **#42241** (tjtanaa). Drop when it merges. |
+| `patch/13-mamba-postprocess-skip` | Skip mamba postprocess kernel when no block boundary can be crossed | **V1 only** | tracking | donor commit `df2c23014` (Tony), adapts **#42574** (mamingyuan-nv) atop patch/07. Drop when #42574 merges. |
 
 Provenance note (v15-dflash triage 2026-07-03; **corrected 2026-07-04**):
 patches 03–13 were triaged out of `repne/vllm` branch `v15-dflash`. Capability
@@ -77,13 +76,14 @@ explicit "NOT covered" line for any sibling behind an open PR):
   2026-07-01) adds `_resolve_layer_attention`, covering the MiMo shape
   (`layer_types=None` + `use_swa`, and all-`full_attention`). Exercised by
   MiMo-family drafters (e.g. `XiaomiMiMo/MiMo-V2.5-Pro-FP4-DFlash`).
-- **Mixed per-layer `layer_types` DFlash SWA was NOT upstream** — it is gated
-  behind the still-open **#40898** (+ FlashInfer **#43200**), which #46104's own
-  raise at `qwen3_dflash.py:93` explicitly defers to. The original 2026-07-03
-  triage read #46104's *title* as full coverage and dropped #40898, crashing the
-  production DFlash-8 drafter (`z-lab/Qwen3.6-27B-DFlash`, `layer_types =
-  4×sliding_attention@2048 + 1×full_attention`) at engine start. Restored as
-  **`patch/09-dflash-swa`**.
+- **Mixed per-layer `layer_types` DFlash SWA was NOT upstream** at that base — it
+  was gated behind the then-open **#40898** (+ FlashInfer **#43200**), which
+  #46104's own raise at `qwen3_dflash.py:93` explicitly defers to. The original
+  2026-07-03 triage read #46104's *title* as full coverage and dropped #40898,
+  crashing the production DFlash-8 drafter (`z-lab/Qwen3.6-27B-DFlash`,
+  `layer_types = 4×sliding_attention@2048 + 1×full_attention`) at engine start.
+  It was restored as `patch/09-dflash-swa`, and **is now genuinely upstream** —
+  see the 2026-07-24 note below.
 - The four still-open v15 perf changes dropped in the same triage are restored as
   **patches 10–13** (see rows above).
 - Full 22-PR + 3-donor-commit disposition — including the four "fixed on main"
@@ -93,6 +93,48 @@ explicit "NOT covered" line for any sibling behind an open PR):
   recorded in `openspec/changes/restore-v15-dflash-swa-gaps/` (proposal.md
   §Blast-Radius 11 + tasks.md §7). See the **Donor-branch triage** procedure
   below for how this class of miss is now prevented.
+
+Provenance note (rebase onto nightly `4080263bb`, 2026-07-24): **`patch/09-dflash-swa`
+dropped — genuinely superseded.** Verified at capability altitude, per step 3 below:
+
+- **#40898 is CLOSED** (2026-07-14, unmerged), superseded by **#47914**
+  (`0d12618e9`, merged 2026-07-08) + **#48113** (merged 2026-07-10), which land
+  hybrid sliding/full DFlash drafters **in the V2 model runner**
+  (`vllm/v1/worker/gpu/spec_decode/dflash/`). The V1 path still raises
+  `NotImplementedError` for mixed `layer_types` (`qwen3_dflash.py:118-127`).
+- **The prod config reaches it automatically.** `VllmConfig.use_v2_model_runner`
+  forces V2 via `_dflash_needs_multi_kv_group()` (`vllm/config/vllm.py:593-603`)
+  whenever a DFlash draft mixes sliding and full layers — true for
+  `z-lab/Qwen3.6-27B-DFlash` (4×`sliding_attention` + 1×`full_attention`,
+  `sliding_window: 2048`). No env var needed.
+- **The mechanism differs from ours, and covers more.** patch/09 widened the
+  sliding draft layers' KV spec to `FullAttentionSpec` and hand-built per-
+  `window_left` FlashInfer metadata groups (#43200). Upstream instead gives each
+  attention shape its own KV cache group (`per_layer_sliding_window` →
+  `SlidingWindowSpec`/`FullAttentionSpec`), so each group's metadata builder
+  derives its own `window_left`, and carries per-layer causality through
+  `get_draft_attn_causal()` → `_group_causal` → `attn_utils` per-group `causal`.
+- **#43200 is therefore NOT needed** even though it is still OPEN: its per-
+  `window_left` grouping is what the KV-cache-group split already provides under
+  V2. Both halves of patch/09 drop; the branch is deleted and **09 is left
+  vacant** (branch names are referenced by build tag annotations — later patches
+  are not renumbered).
+- **Consequence — the two prod profiles now run different model runners.**
+  DFlash-8 is forced to V2; MTP-3 stays on V1 (`_is_default_v2_model_runner_model()`
+  returns False for the hybrid/GDN Qwen3.6-27B target). This is what the new
+  **Runner** column records: a `V1 only` patch is *inert on DFlash-8*. PR-state
+  auditing cannot see this — `audit-inventory.sh` only checks whether the tracked
+  PR is still OPEN, not whether the patched code path is still executed.
+
+Runner legend (which model runner executes the patched code):
+
+- **shared** — live on both profiles (`vllm/model_executor/**`,
+  `vllm/entrypoints/**`, `vllm/v1/core/**`, `vllm/v1/structured_output/**`,
+  `vllm/v1/attention/backends/**` — V2 uses the same metadata builders).
+- **V1 only** — `vllm/v1/worker/gpu_model_runner.py`, `vllm/v1/spec_decode/**`,
+  `vllm/v1/sample/**`. V2 has its own equivalents under `vllm/v1/worker/gpu/**`,
+  so these patches do nothing on a V2-forced profile. Re-check this column on
+  every rebase: upstream is migrating runners.
 
 Intent legend:
 
@@ -138,10 +180,30 @@ provenance note above). These steps are the guardrail; none may be skipped.
    the upstream PR it adapts (e.g. `patch/13` ← `df2c23014` → #42574) or drop it
    with a reason.
 
+5. **Liveness — is the patched path still executed?** A patch can rot without its
+   tracked PR moving at all, when upstream reimplements the area somewhere else
+   and our config starts taking the new path. Classify every carried patch by
+   which model runner runs its code (the **Runner** column) and re-derive it on
+   every rebase:
+
+   ```bash
+   prev=base/current
+   for b in $(git branch --list 'patch/*' | tr -d ' *'); do
+     echo "== $b"; git diff --name-only "$prev" "$b"; prev=$b
+   done
+   git grep -l '<patched module>' <new-base> -- vllm/   # who still imports it?
+   ```
+
+   A patch confined to `vllm/v1/worker/gpu_model_runner.py`, `vllm/v1/spec_decode/**`
+   or `vllm/v1/sample/**` is dead on any profile that runs the V2 model runner.
+   This is exactly how `patch/09` became redundant: nothing in its row changed,
+   but the config started auto-selecting V2.
+
 Every PR must end in exactly one bucket — merged-and-dropped, carried (with the
 PR to watch), or dropped-with-reason. None left unclassified. The inventory-audit
 script (`scripts/fork/audit-inventory.sh`) then fails CI if a carried patch's
-tracked PR later leaves the OPEN state.
+tracked PR later leaves the OPEN state. It does **not** check liveness — step 5
+is manual.
 
 ## One-time setup
 
@@ -309,8 +371,16 @@ matrix (run after `build-image.sh`, before deploying):
 
 | Profile | Config (delta from the common Qwen3.6-27B-FP8 target) | Boot gate |
 | ------- | ----------------------------------------------------- | --------- |
-| **P1 — MTP-3** | `speculative_config={method: mtp, num_speculative_tokens: 3}` | `/v1/models` responds |
-| **P2 — DFlash-8** | `speculative_config={method: dflash, num_speculative_tokens: 8, model: z-lab/Qwen3.6-27B-DFlash, attention_backend: FLASHINFER, draft_sample_method: greedy}`, `kv_cache_dtype=fp8_e4m3`, `max_model_len=262144`, `block_size=32`, prefix caching, `cudagraph_mode=FULL_AND_PIECEWISE` | `/v1/models` responds; **no** `NotImplementedError`/causal-assert from the DFlash path |
+| **P1 — MTP-3** | `speculative_config={method: mtp, num_speculative_tokens: 3}` | `/v1/models` responds; log shows the **V1** model runner |
+| **P2 — DFlash-8** | `speculative_config={method: dflash, num_speculative_tokens: 8, model: z-lab/Qwen3.6-27B-DFlash, attention_backend: FLASHINFER, draft_sample_method: greedy}`, `kv_cache_dtype=fp8_e4m3`, `max_model_len=262144`, `block_size=32`, prefix caching, `cudagraph_mode=FULL_AND_PIECEWISE` | `/v1/models` responds; **no** `NotImplementedError`/causal-assert from the DFlash path; log shows the **V2** model runner auto-selected |
+
+Record which runner each profile selected — that is what the inventory's
+**Runner** column is checked against. A profile silently changing runners across
+a rebase is how a carried patch goes inert without any inventory row moving.
+Boot alone is also not sufficient when a patch is replaced by an upstream
+mechanism that differs structurally: serve a real completion and compare the
+reported acceptance length against the previous build's, since a
+wrong-causality draft boots cleanly and only degrades output.
 
 If any profile fails to reach serving state, **reject the base (or the offending
 patch)** and record the result against the build provenance tag (`build/<date>`).
