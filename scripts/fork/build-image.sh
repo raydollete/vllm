@@ -149,8 +149,15 @@ say "Building ${image_tag} on vllm/vllm-openai:${image_ref}"
 # GPU is available.
 if [[ "${SKIP_IMPORT_CHECK:-0}" != "1" ]]; then
   say "Verifying patched modules import (docker run --gpus all)"
-  if ! docker run --rm --gpus all "${image_tag}" python3 -c \
-      'import vllm, vllm.v1.structured_output, vllm.v1.core.sched.scheduler; print("import check OK:", vllm.__version__)'; then
+  # --entrypoint: the official image's entrypoint is `vllm serve`, which would
+  # swallow these args as CLI flags.
+  # The module list is derived from the overlay, so the check actually exercises
+  # what this build changed rather than a fixed pair of modules.
+  import_probe="$(printf '%s\n' "${overlay_files[@]}" \
+    | sed -n 's#^vllm/\(.*\)\.py$#\1#p' | sed 's#/__init__$##; s#/#.#g' \
+    | sed 's/^/vllm./' | sort -u | paste -sd, -)"
+  if ! docker run --rm --gpus all --entrypoint python3 "${image_tag}" -c \
+      "import importlib, vllm; [importlib.import_module(m) for m in '${import_probe}'.split(',')]; print('import check OK:', vllm.__version__)"; then
     die "Post-build import check FAILED for ${image_tag}. Image left in place for inspection."
   fi
 else
